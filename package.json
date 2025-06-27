@@ -1,7 +1,7 @@
 {
   "name": "nodejs-cicd-pipeline",
   "version": "1.0.0",
-  "description": "",
+  "description": "// trigger pipeline // testing trigger",
   "main": "app/index.js",
   "scripts": {
     "start": "node app/index.js",
@@ -12,6 +12,12 @@
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "supertest": "^6.3.3"
-  }
+    "supertest": "^6.3.4"
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

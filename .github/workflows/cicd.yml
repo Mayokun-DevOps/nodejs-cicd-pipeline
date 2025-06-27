@@ -1,58 +1,43 @@
-name: Node.js CI/CD Pipeline
+name: Node.js CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [ "main" ]
   pull_request:
-    branches: [main]
+    branches: [ "main" ]
 
 jobs:
-  build-and-deploy:
+  test:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v3
-
+    - uses: actions/checkout@v4
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: 18
+    - run: npm ci
+    - run: npm test
 
-    - name: Install Dependencies
-      run: npm install
-
-    - name: Run Tests
-      run: npm test
-
-    - name: Lint Code
-      run: |
-        npm install --save-dev eslint
-        npx eslint . || true
-
-    - name: Build Docker Image
-      run: |
-        docker build -t nodejs-cicd-pipeline .
-
-    - name: Save Docker Image to TAR
-      run: docker save nodejs-cicd-pipeline -o app.tar
-
-    - name: Copy Image to App Server
+  build-and-deploy:
+    needs: test
+    runs-on: self-hosted
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build Docker image
+      run: docker build -t nodejs-cicd-app .
+    - name: Save container image
+      run: docker save nodejs-cicd-app -o app.tar
+    - name: Copy image to app server
       uses: appleboy/scp-action@v0.1.4
       with:
-        host: ${{ secrets.REMOTE_HOST }}
-        username: ${{ secrets.REMOTE_USER }}
-        key: ${{ secrets.REMOTE_KEY }}
-        source: "./app.tar"
-        target: "/home/vagrant/"
-
-    - name: Deploy on App Server via SSH
-      uses: appleboy/ssh-action@v0.1.10
-      with:
-        host: ${{ secrets.REMOTE_HOST }}
-        username: ${{ secrets.REMOTE_USER }}
-        key: ${{ secrets.REMOTE_KEY }}
-        script: |
-          docker load -i app.tar
-          docker stop app || true && docker rm app || true
-          docker run -d --name app -p 3000:3000 nodejs-cicd-pipeline
+        host: ${{ secrets.APP_SERVER_IP }}
+        username: vagrant
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        source: "app.tar"
+        target: "/home/vagrant"
+    - name: Deploy on App Server
+      run: |
+        ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa vagrant@${{ secrets.APP_SERVER_IP }} "
+          docker load -i /home/vagrant/app.tar &&
+          docker compose -f /home/vagrant/docker-compose.yml up -d --build
+        "

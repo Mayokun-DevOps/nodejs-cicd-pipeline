@@ -2,71 +2,48 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
-  test:
-    name: Run Tests
+  build-test-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
 
-      - name: Install dependencies
-        run: npm install
+    - name: Install dependencies
+      run: npm install
 
-      - name: Run tests
-        run: npm test
+    - name: Lint code
+      run: npm run lint
 
-      - name: Run ESLint for code quality
-        run: |
-          npm install eslint --save-dev
-          npx eslint .
+    - name: Run tests
+      run: npm test
 
-  build-and-deploy:
-    name: Build & Deploy to App Server
-    needs: test
-    runs-on: ubuntu-latest
+    - name: Build Docker image
+      run: docker build -t nodejs-cicd-app .
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Setup SSH Key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.REMOTE_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
+    - name: Copy Docker image files to App Server
+      run: |
+        scp -i ~/.ssh/id_rsa -r ./ vagrant@${{ secrets.REMOTE_HOST }}:/home/vagrant/nodejs-cicd-app
 
-      - name: Install dependencies & Build app
-        run: |
-          npm install
-          mkdir -p deploy
-          tar -czf deploy/app.tar.gz .
+    - name: Restart App with Docker Compose
+      run: |
+        ssh -i ~/.ssh/id_rsa vagrant@${{ secrets.REMOTE_HOST }} \
+        "cd /home/vagrant/nodejs-cicd-app && docker compose up -d --build"
 
-      - name: Setup SSH Access
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.APP_SERVER_IP }} >> ~/.ssh/known_hosts
-
-      - name: Copy App to Remote Server
-        run: |
-          scp -i ~/.ssh/id_rsa deploy/app.tar.gz vagrant@${{ secrets.APP_SERVER_IP }}:/home/vagrant/
-
-      - name: Remote Deploy (Docker Compose)
-        run: |
-          ssh -i ~/.ssh/id_rsa vagrant@${{ secrets.APP_SERVER_IP }} << 'EOF'
-            cd /home/vagrant
-            tar -xzf app.tar.gz -C app/
-            cd app/
-            docker compose up -d --build
-          EOF

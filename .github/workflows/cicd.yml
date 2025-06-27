@@ -1,63 +1,65 @@
-name: Node.js CI/CD Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
-    branches:
-      - main
+    branches: [ "main" ]
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    name: CI/CD Pipeline
+    runs-on: self-hosted  # Your Vagrant-based GitHub Actions runner (ci-server)
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
 
-    - name: Install dependencies
-      run: npm install
+      - name: Install Dependencies
+        run: npm install
 
-    - name: Run ESLint
-      run: npm run lint
+      - name: Run Lint
+        run: npm run lint
 
-    - name: Run Tests
-      run: npm test
+      - name: Run Tests
+        run: npm test
 
-    - name: Build Docker Image
-      run: docker build -t nodejs-app:latest .
+      - name: Build App
+        run: |
+          mkdir -p build
+          cp -r app Dockerfile docker-compose.yml build/
 
-    - name: Save Docker Image to tar
-      run: docker save nodejs-app:latest -o app.tar
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          REMOTE_HOST="${{ secrets.REMOTE_HOST }}"
+          ssh-keyscan -H "$REMOTE_HOST" >> ~/.ssh/known_hosts
 
-    - name: Setup SSH Key
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H ${{ secrets.REMOTE_HOST }} >> ~/.ssh/known_hosts
+      - name: Copy App to App Server
+        run: |
+          scp -i ~/.ssh/id_rsa -r ./build/* vagrant@${{ secrets.REMOTE_HOST }}:/home/vagrant/app/
 
-    - name: Copy Docker Image to Remote Server
-      uses: appleboy/scp-action@v0.1.4
-      with:
-        host: ${{ secrets.REMOTE_HOST }}
-        username: ${{ secrets.REMOTE_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        source: "app.tar"
-        target: "/home/vagrant/app.tar"
-        port: 22
+      - name: Deploy with Docker Compose
+        run: |
+          ssh -i ~/.ssh/id_rsa vagrant@${{ secrets.REMOTE_HOST }} << 'EOF'
+          cd /home/vagrant/app
+          docker compose down || true
+          docker compose up -d --build
+          EOF
 
-    - name: Load and Restart Container on Remote Server
-      run: |
-        ssh -i ~/.ssh/id_rsa vagrant@${{ secrets.REMOTE_HOST }} << 'EOF'
-        docker load -i /home/vagrant/app.tar
-        cd /home/vagrant/app
-        docker compose down
-        docker compose up -d --build
-        EOF
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "Rollback triggered"
+          ssh -i ~/.ssh/id_rsa vagrant@${{ secrets.REMOTE_HOST }} << 'EOF'
+          docker compose -f /home/vagrant/app/docker-compose.yml down
+          git -C /home/vagrant/app reset --hard HEAD~1
+          docker compose -f /home/vagrant/app/docker-compose.yml up -d --build
+          EOF

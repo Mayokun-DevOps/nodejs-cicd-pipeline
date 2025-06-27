@@ -1,15 +1,29 @@
-- name: Setup SSH Key and Known Hosts
-  run: |
-    mkdir -p ~/.ssh
-    echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-    chmod 600 ~/.ssh/id_rsa
-    ssh-keyscan 192.168.56.14 >> ~/.ssh/known_hosts
+name: CI/CD Pipeline
 
-- name: Copy files using scp
-  run: |
-    scp -i ~/.ssh/id_rsa -r ./app vagrant@192.168.56.14:/home/vagrant/app
+on:
+  push:
+    branches: [main]
 
-- name: Restart App with Docker Compose
-  run: |
-    ssh -i ~/.ssh/id_rsa vagrant@192.168.56.14 "docker compose -f /home/vagrant/app/docker-compose.yml up -d --build"
+jobs:
+  deploy:
+    runs-on: self-hosted
 
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup SSH Access
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan 192.168.56.14 >> ~/.ssh/known_hosts
+
+      - name: Copy App to App Server
+        run: |
+          scp -i ~/.ssh/id_rsa -r ./app vagrant@192.168.56.14:/home/vagrant/app
+
+      - name: Restart App on App Server
+        run: |
+          ssh -i ~/.ssh/id_rsa vagrant@192.168.56.14 \
+          "cd /home/vagrant/app && docker compose up -d --build"

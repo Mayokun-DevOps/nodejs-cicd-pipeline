@@ -1,0 +1,14 @@
+- name: Setup SSH Key
+  run: |
+    mkdir -p ~/.ssh
+    echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+    chmod 600 ~/.ssh/id_rsa
+    ssh-keyscan 192.168.56.14 >> ~/.ssh/known_hosts
+
+- name: Copy files to app-server
+  run: |
+    scp -i ~/.ssh/id_rsa -r ./app vagrant@192.168.56.14:/home/vagrant/app
+
+- name: Restart App (or Docker)
+  run: |
+    ssh -i ~/.ssh/id_rsa vagrant@192.168.56.14 "docker compose -f /home/vagrant/app/docker-compose.yml up -d --build"

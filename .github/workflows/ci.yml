@@ -1,0 +1,29 @@
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    env:
+      HOST: 192.168.56.14
+      USERNAME: vagrant
+      KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Copy files to App Server via SCP
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USERNAME }}
+          key: ${{ env.KEY }}
+          source: "dist/"
+          target: "~/app/"
+
+      - name: Run app on App Server via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ env.HOST }}
+          username: ${{ env.USERNAME }}
+          key: ${{ env.KEY }}
+          script: |
+            cd ~/app/
+            docker-compose up -d --build
